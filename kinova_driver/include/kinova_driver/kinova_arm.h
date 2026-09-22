@@ -111,6 +111,7 @@ class KinovaArm
     void cartesianVelocityTimer(const ros::TimerEvent&);
     void jointVelocityTimer(const ros::TimerEvent&);
     void statusTimer(const ros::TimerEvent&);
+    void velocityDiagnosticsTimer(const ros::WallTimerEvent&);
 
     void publishJointAngles(void);
     void publishToolPosition(void);
@@ -158,6 +159,7 @@ class KinovaArm
 
     // Timers for control loops
     ros::Timer status_timer_;
+    ros::WallTimer velocity_diagnostics_timer_;
 
     // Parameters
     std::string kinova_robotType_;

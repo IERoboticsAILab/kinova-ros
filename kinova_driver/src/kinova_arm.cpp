@@ -231,6 +231,8 @@ KinovaArm::KinovaArm(KinovaComm &arm, const ros::NodeHandle &nodeHandle, const s
 
     status_timer_ = node_handle_.createTimer(ros::Duration(status_interval_seconds_),
                                            &KinovaArm::statusTimer, this);
+    velocity_diagnostics_timer_ = node_handle_.createWallTimer(
+        ros::WallDuration(1.0), &KinovaArm::velocityDiagnosticsTimer, this);
 
     ROS_INFO("The arm is ready to use.");
 }
@@ -482,7 +484,9 @@ bool KinovaArm::setEndEffectorOffsetCallback(kinova_msgs::SetEndEffectorOffset::
 
 void KinovaArm::cartesianVelocityCallback(const kinova_msgs::PoseVelocityConstPtr& cartesian_vel)
 {
-    if (!kinova_comm_.isStopped())
+    const bool stopped = kinova_comm_.isStopped();
+    kinova_comm_.recordCartesianVelocityCallback(stopped);
+    if (!stopped)
     {
         cartesian_velocities_.X = cartesian_vel->twist_linear_x;
         cartesian_velocities_.Y = cartesian_vel->twist_linear_y;
@@ -494,6 +498,13 @@ void KinovaArm::cartesianVelocityCallback(const kinova_msgs::PoseVelocityConstPt
         // orientation velocity of cartesian_velocities_ is based on twist.angular
         kinova_comm_.setCartesianVelocities(cartesian_velocities_);
     }
+}
+
+void KinovaArm::velocityDiagnosticsTimer(const ros::WallTimerEvent&)
+{
+    bool enabled = false;
+    node_handle_.getParamCached("velocity_diagnostics", enabled);
+    kinova_comm_.logVelocityDiagnostics(enabled);
 }
 
 void KinovaArm::cartesianVelocityWithFingersCallback(const kinova_msgs::PoseVelocityWithFingersConstPtr& cartesian_vel_with_fingers)

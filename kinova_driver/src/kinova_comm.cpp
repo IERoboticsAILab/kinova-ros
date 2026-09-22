@@ -45,11 +45,15 @@
 
 #include <ros/ros.h>
 #include "kinova_driver/kinova_comm.h"
-#include "kinova_driver/kinova_control_mode.h"
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <tf/tf.h>
 #include <arpa/inet.h>
+#include "kinova_driver/kinova_control_mode.h"
+#include "kinova_driver/kinova_velocity_diagnostics.h"
 
 namespace kinova
 {
@@ -1098,6 +1102,8 @@ void KinovaComm::setCartesianVelocities(const CartesianInfo &velocities)
 
     if (isStopped())
     {
+        if (velocity_diagnostics_.enabled)
+            ++velocity_diagnostics_.stopped_sends;
         ROS_INFO("The cartesian velocities could not be set because the arm is stopped");
         kinova_api_.eraseAllTrajectories();
         return;
@@ -1114,11 +1120,121 @@ void KinovaComm::setCartesianVelocities(const CartesianInfo &velocities)
     // confusingly, velocity is passed in the position struct
     kinova_velocity.Position.CartesianPosition = velocities;
 
+    ros::WallTime send_start;
+    if (velocity_diagnostics_.enabled)
+    {
+        ++velocity_diagnostics_.sdk_sends;
+        velocity_diagnostics_.last_command = velocities;
+        send_start = ros::WallTime::now();
+    }
     int result = kinova_api_.sendAdvanceTrajectory(kinova_velocity);
+    if (velocity_diagnostics_.enabled)
+    {
+        velocity_diagnostics_.have_send_result = true;
+        velocity_diagnostics_.last_send_result = result;
+        velocity_diagnostics_.max_send_ms = std::max(
+            velocity_diagnostics_.max_send_ms,
+            (ros::WallTime::now() - send_start).toSec() * 1000.0);
+        if (result == NO_ERROR_KINOVA)
+            ++velocity_diagnostics_.sdk_successes;
+        else
+        {
+            ++velocity_diagnostics_.sdk_failures;
+            ROS_ERROR_STREAM("[VELOCITY_DIAG] Cartesian SDK send failed: rc=" << result);
+        }
+    }
     if (result != NO_ERROR_KINOVA)
     {
         throw KinovaCommException("Could not send advanced Cartesian velocity trajectory", result);
     }
+}
+
+void KinovaComm::recordCartesianVelocityCallback(bool software_stopped)
+{
+    boost::recursive_mutex::scoped_lock lock(api_mutex_);
+    if (!velocity_diagnostics_.enabled)
+        return;
+    const ros::WallTime now = ros::WallTime::now();
+    if (!velocity_diagnostics_.last_callback.isZero())
+        velocity_diagnostics_.max_callback_gap_ms = std::max(
+            velocity_diagnostics_.max_callback_gap_ms,
+            (now - velocity_diagnostics_.last_callback).toSec() * 1000.0);
+    velocity_diagnostics_.last_callback = now;
+    ++velocity_diagnostics_.callbacks;
+    if (software_stopped)
+        ++velocity_diagnostics_.stopped_callbacks;
+}
+
+void KinovaComm::logVelocityDiagnostics(bool enabled)
+{
+    // Do not wait behind another SDK operation just to collect diagnostics.
+    boost::recursive_mutex::scoped_try_lock lock(api_mutex_);
+    if (!lock.owns_lock())
+    {
+        if (enabled)
+            ROS_WARN_THROTTLE(5.0, "[VELOCITY_DIAG] poll skipped: SDK mutex busy");
+        return;
+    }
+    if (!enabled)
+    {
+        velocity_diagnostics_.enabled = false;
+        return;
+    }
+    const ros::WallTime now = ros::WallTime::now();
+    if (!velocity_diagnostics_.enabled)
+    {
+        velocity_diagnostics_ = VelocityDiagnostics();
+        velocity_diagnostics_.enabled = true;
+        velocity_diagnostics_.window_start = now;
+        lock.unlock();
+        ROS_INFO("[VELOCITY_DIAG] enabled: read-only SDK status at 1 Hz; rc=1 means API success, not measured motion");
+        return;
+    }
+
+    const VelocityDiagnostics counters = velocity_diagnostics_;
+    const bool software_stopped = is_software_stop_;
+    const ros::WallTime query_start = ros::WallTime::now();
+    const VelocityDiagnosticStatus status = readVelocityDiagnosticStatus(kinova_api_);
+    const double query_ms = (ros::WallTime::now() - query_start).toSec() * 1000.0;
+
+    velocity_diagnostics_.window_start = now;
+    velocity_diagnostics_.callbacks = 0;
+    velocity_diagnostics_.stopped_callbacks = 0;
+    velocity_diagnostics_.sdk_sends = 0;
+    velocity_diagnostics_.sdk_successes = 0;
+    velocity_diagnostics_.sdk_failures = 0;
+    velocity_diagnostics_.stopped_sends = 0;
+    velocity_diagnostics_.max_callback_gap_ms = 0;
+    velocity_diagnostics_.max_send_ms = 0;
+    lock.unlock();
+
+    const double elapsed = (now - counters.window_start).toSec();
+    std::ostringstream message;
+    message << std::fixed << std::setprecision(3)
+            << "[VELOCITY_DIAG] window_s=" << elapsed
+            << " callbacks=" << counters.callbacks
+            << " callback_hz=" << (elapsed > 0 ? counters.callbacks / elapsed : 0)
+            << " max_callback_gap_ms=" << counters.max_callback_gap_ms
+            << " callback_age_ms=" << (counters.last_callback.isZero() ? -1.0 :
+                (now - counters.last_callback).toSec() * 1000.0)
+            << " software_stop=" << software_stopped
+            << " stopped_callbacks=" << counters.stopped_callbacks
+            << " stopped_sends=" << counters.stopped_sends
+            << " sdk_sends=" << counters.sdk_sends
+            << " sdk_ok=" << counters.sdk_successes
+            << " sdk_fail=" << counters.sdk_failures
+            << " last_send_rc=";
+    if (counters.have_send_result)
+        message << counters.last_send_result;
+    else
+        message << "none";
+    message << " max_send_ms=" << counters.max_send_ms
+            << " last_linear=[" << counters.last_command.X << ","
+            << counters.last_command.Y << "," << counters.last_command.Z << "]"
+            << " last_angular=[" << counters.last_command.ThetaX << ","
+            << counters.last_command.ThetaY << "," << counters.last_command.ThetaZ << "]"
+            << " query_ms=" << query_ms << " " << formatVelocityDiagnosticStatus(status);
+    ROS_INFO_STREAM(message.str());
 }
 
 /**

@@ -47,6 +47,7 @@
 #define KINOVA_DRIVER_KINOVA_COMM_H
 
 #include <boost/thread/recursive_mutex.hpp>
+#include <cstdint>
 
 #include <kinova/KinovaTypes.h>
 
@@ -138,6 +139,9 @@ class KinovaComm
     //! \arg push - If true clears previous trajectories
     void setCartesianPosition(const KinovaPose &position, int timeout = 0, bool push = false);
     void setCartesianVelocities(const CartesianInfo &velocities);
+    // Observation only: called by the ROS callback and an opt-in 1 Hz timer.
+    void recordCartesianVelocityCallback(bool software_stopped);
+    void logVelocityDiagnostics(bool enabled);
     void setCartesianVelocitiesWithFingers(const CartesianInfo &velocities, const FingerAngles& fingers);
     void setCartesianVelocitiesWithFingerVelocity(const CartesianInfo &velocities, const FingerAngles& fingers);
     float getMaxTranslationVelocity(void);
@@ -181,6 +185,24 @@ class KinovaComm
 
 
  private:
+    struct VelocityDiagnostics
+    {
+        bool enabled = false;
+        std::uint64_t callbacks = 0;
+        std::uint64_t stopped_callbacks = 0;
+        std::uint64_t sdk_sends = 0;
+        std::uint64_t sdk_successes = 0;
+        std::uint64_t sdk_failures = 0;
+        std::uint64_t stopped_sends = 0;
+        ros::WallTime window_start;
+        ros::WallTime last_callback;
+        double max_callback_gap_ms = 0;
+        double max_send_ms = 0;
+        bool have_send_result = false;
+        int last_send_result = 0;
+        CartesianInfo last_command = {};
+    } velocity_diagnostics_;
+
     boost::recursive_mutex& api_mutex_;
     kinova::KinovaAPI kinova_api_;
     bool is_software_stop_;

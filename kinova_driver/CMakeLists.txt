@@ -163,6 +163,11 @@ if(CATKIN_ENABLE_TESTING)
     add_dependencies(test_control_mode ${catkin_EXPORTED_TARGETS})
     target_link_libraries(test_control_mode kinova_driver ${catkin_LIBRARIES})
   endif()
+  catkin_add_gtest(test_velocity_diagnostics test/test_velocity_diagnostics.cpp)
+  if(TARGET test_velocity_diagnostics)
+    add_dependencies(test_velocity_diagnostics ${catkin_EXPORTED_TARGETS})
+    target_link_libraries(test_velocity_diagnostics kinova_driver ${catkin_LIBRARIES})
+  endif()
 endif()
 
 ## Add folders to be run by python nosetests
