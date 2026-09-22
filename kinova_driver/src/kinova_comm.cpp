@@ -45,6 +45,7 @@
 
 #include <ros/ros.h>
 #include "kinova_driver/kinova_comm.h"
+#include "kinova_driver/kinova_control_mode.h"
 #include <string>
 #include <vector>
 #include <tf/tf.h>
@@ -1645,21 +1646,8 @@ void KinovaComm::getEndEffectorOffset(unsigned int &status, float &x, float &y, 
 
 void KinovaComm::SetTorqueControlState(int state)
 {
-    int result;
-    if (state)
-    {
-        ROS_INFO("Switching to torque control");
-        result = kinova_api_.switchTrajectoryTorque(TORQUE);
-    }
-    else
-    {
-        ROS_INFO("Switching to position control");
-        result = kinova_api_.switchTrajectoryTorque(POSITION);
-    }
-    if (result != NO_ERROR_KINOVA)
-    {
-        throw KinovaCommException("Could not set the torque control state", result);
-    }
+    boost::recursive_mutex::scoped_lock lock(api_mutex_);
+    ensureTrajectoryControlMode(kinova_api_, state ? TORQUE : POSITION);
 }
 
 int KinovaComm::SelfCollisionAvoidanceInCartesianMode(int state)

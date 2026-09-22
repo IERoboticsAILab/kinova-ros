@@ -157,11 +157,13 @@ install(DIRECTORY include/${PROJECT_NAME}/
 ## Testing ##
 #############
 
-## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_kinova_driver.cpp)
-# if(TARGET ${PROJECT_NAME}-test)
-#   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
-# endif()
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_control_mode test/test_control_mode.cpp)
+  if(TARGET test_control_mode)
+    add_dependencies(test_control_mode ${catkin_EXPORTED_TARGETS})
+    target_link_libraries(test_control_mode kinova_driver ${catkin_LIBRARIES})
+  endif()
+endif()
 
 ## Add folders to be run by python nosetests
 #catkin_add_nosetests(test)
