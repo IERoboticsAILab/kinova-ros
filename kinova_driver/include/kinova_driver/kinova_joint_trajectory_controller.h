@@ -67,8 +67,32 @@ private:
     };
 
 
+    // Closed-loop tracking (trajectory_controller/closed_loop). The open-loop
+    // path sends each point's velocity for that point's time and never looks
+    // at the joints, so a move can "finish" centimetres short. Closed loop
+    // sends the trajectory's velocity at this instant plus a correction
+    // towards its position at this instant, then holds the last point until
+    // the joints are on it.
+    bool closed_loop_;
+    double position_gain_;          // 1/s
+    double max_correction_;         // rad/s, per joint
+    double max_tracking_error_;     // rad: further behind than this aborts
+    double goal_tolerance_;         // rad: every joint within this is done
+    double settle_timeout_;         // s after the trajectory's end
+    bool tracking_;
+    ros::Time tracking_start_;
+    size_t tracking_segment_;
+    double tracking_max_error_;
+    std::vector<double> plan_times_;
+    std::vector<std::vector<double> > plan_positions_;   // per point, rad, unwrapped
+    std::vector<std::vector<double> > plan_velocities_;  // per point, rad/s
+
     // call back function when receive a trajectory command
     void commandCB(const trajectory_msgs::JointTrajectoryConstPtr &traj_msg);
+    void startClosedLoop(const trajectory_msgs::JointTrajectory &traj, const std::vector<int> &lookup);
+    void closedLoopStep();
+    void stopClosedLoop();
+    void sampleTrajectory(double t, std::vector<double> &q, std::vector<double> &v);
 
     // reflash the robot state and publish the joint state: either by timer or thread
     void update_state(); // by thread

@@ -1,4 +1,5 @@
 #include <kinova_driver/joint_trajectory_action_server.h>
+#include <cmath>
 
 using namespace kinova;
 
@@ -239,7 +240,10 @@ void JointTrajectoryActionController::controllerStateCB(const control_msgs::Foll
         for (size_t i = 0; i < msg->joint_names.size() && inside_goal_constraints; ++i)
         {
             // computing error from goal pose
-            double abs_error = fabs(msg->actual.positions[i] - current_traj_.points[last].positions[i]);
+            // Modulo a full turn: a continuous joint can read several turns
+            // from the angle MoveIt planned with, at the same position.
+            double diff = msg->actual.positions[i] - current_traj_.points[last].positions[i];
+            double abs_error = fabs(atan2(sin(diff), cos(diff)));
             double goal_constraint = goal_constraints_[msg->joint_names[i]];
             if (goal_constraint >= 0 && abs_error > goal_constraint)
                 inside_goal_constraints = false;
